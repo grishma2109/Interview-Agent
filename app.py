@@ -1,4 +1,4 @@
-# app_interview.py (updated with safe streamlit-webrtc fallbacks)
+# app_interview.py (patched — safe fallback for cv2 & streamlit-webrtc)
 import os
 import io
 import time
@@ -8,11 +8,10 @@ from typing import List
 import pickle
 
 import streamlit as st
-import cv2
 import numpy as np
 
-# local modules (add to your project)
-# Ensure these modules exist: resume_parser, interview_engine, report_generator, agent
+# local modules (these must exist in your project)
+# resume_parser, interview_engine, report_generator, agent
 from resume_parser import extract_text_from_pdf, extract_skills_and_summary, extract_experience_years
 from interview_engine import (
     generate_technical_questions,
@@ -90,7 +89,6 @@ if "role" not in st.session_state:
 if "motion_alert_since" not in st.session_state:
     st.session_state.motion_alert_since = None
 if "voice_questions" not in st.session_state:
-    # 2-3 voice questions
     st.session_state.voice_questions = [
         "Please briefly introduce yourself and highlight one project you're proud of.",
         "Explain a technical concept from your resume (e.g., a library or algorithm) in simple terms.",
@@ -101,28 +99,32 @@ if "voice_answers" not in st.session_state:
 if "voice_transcripts" not in st.session_state:
     st.session_state.voice_transcripts = [None] * len(st.session_state.voice_questions)
 
-# ---------- Safe import for streamlit-webrtc ----------
+# ---------- Safe imports for cv2 and streamlit-webrtc ----------
+# cv2 (OpenCV)
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except Exception:
+    cv2 = None
+    CV2_AVAILABLE = False
+
+# streamlit-webrtc
 WEBCAM_AVAILABLE = False
 try:
-    # Try to import all the names we may use
     from streamlit_webrtc import VideoTransformerBase, webrtc_streamer, WebRtcMode, RTCConfiguration
     WEBCAM_AVAILABLE = True
 except Exception:
-    # Provide harmless fallbacks so the app doesn't crash on hosts where native deps fail
     VideoTransformerBase = object
 
-    # dummy WebRtcMode with attribute SENDRECV for compatibility
     class _DummyWebRtcMode:
         SENDRECV = "sendrecv"
     WebRtcMode = _DummyWebRtcMode
 
-    # Dummy RTCConfiguration passthrough (we will accept dicts)
     class _DummyRTCConfiguration:
         def __init__(self, config):
             self.configuration = config
     RTCConfiguration = _DummyRTCConfiguration
 
-    # Dummy webrtc_streamer that returns an object with state.playing False
     class _DummyState:
         def __init__(self):
             self.playing = False
@@ -135,25 +137,35 @@ except Exception:
         st.warning("Video features disabled (streamlit-webrtc not available on this host).")
         return _DummyCtx()
 
+# Inform user if motion detection will be disabled
+if not CV2_AVAILABLE:
+    st.sidebar.warning("OpenCV (`cv2`) not installed on this host — motion detection disabled. Install `opencv-python-headless` locally to enable it.")
+
 # ---------- Webcam + motion detection UI ----------
 st.subheader("Camera & Microphone Check (live)")
 st.markdown(
     "Allow camera & microphone when your browser asks. "
-    "The system will monitor for unexpected movements and show an alert when detected."
+    "The system will monitor for unexpected movements and show an alert when detected (if supported)."
 )
 
-# Video transformer using opencv for motion detection
+# Video transformer using optional OpenCV for motion detection
 class MotionDetector(VideoTransformerBase):
     def __init__(self):
-        # if VideoTransformerBase is object fallback, this is harmless
         self.prev_frame = None
 
     def transform(self, frame):
-        # when real streamlit-webrtc is available, frame will have to_ndarray method
+        # If cv2 not available, fallback to returning raw frame
+        if not CV2_AVAILABLE:
+            try:
+                img = frame.to_ndarray(format="bgr24")
+                return img
+            except Exception:
+                return frame
+
+        # Normal path with OpenCV available
         try:
             img = frame.to_ndarray(format="bgr24")
         except Exception:
-            # fallback: if we receive numpy frame already
             img = np.asarray(frame)
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -161,37 +173,41 @@ class MotionDetector(VideoTransformerBase):
 
         if self.prev_frame is None:
             self.prev_frame = gray
-            return img  # return original frame on first call
+            return img
 
         delta_frame = cv2.absdiff(self.prev_frame, gray)
         thresh = cv2.threshold(delta_frame, 30, 255, cv2.THRESH_BINARY)[1]
         thresh = cv2.dilate(thresh, None, iterations=2)
 
         self.prev_frame = gray
-        # Return threshold image (single channel) converted to 3-channel for display compatibility
         try:
             return cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
         except Exception:
             return thresh
 
-# Prepare RTC config if available
+# RTC configuration (if available)
 RTC_CONFIG = {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 rtc_conf_obj = RTCConfiguration(RTC_CONFIG) if WEBCAM_AVAILABLE else None
 
-# Start/attach webrtc streamer (safe)
+# Start or fallback webrtc streamer
 if WEBCAM_AVAILABLE:
     webrtc_ctx = webrtc_streamer(
         key="camera",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=rtc_conf_obj,
         media_stream_constraints={"video": True, "audio": True},
-        video_processor_factory=MotionDetector
+        video_processor_factory=MotionDetector,
     )
 else:
-    webrtc_ctx = webrtc_streamer(key="camera")  # dummy ctx returned by fallback
+    webrtc_ctx = webrtc_streamer(key="camera")  # returns dummy ctx if not available
 
-# Show mic/cam status
-cam_status = "connected" if getattr(getattr(webrtc_ctx, "state", None), "playing", False) else "not connected"
+# Show mic/cam status safely
+cam_playing = False
+try:
+    cam_playing = bool(getattr(getattr(webrtc_ctx, "state", None), "playing", False))
+except Exception:
+    cam_playing = False
+cam_status = "connected" if cam_playing else "not connected"
 st.write("Camera + mic status:", cam_status)
 
 # motion alert check: read the flag file's timestamp within last N seconds
@@ -207,7 +223,6 @@ def check_motion_flag(timeout_seconds=10):
 
 motion_detected, motion_ts = check_motion_flag(timeout_seconds=10)
 if motion_detected:
-    # set session state timer
     if not st.session_state.motion_alert_since:
         st.session_state.motion_alert_since = motion_ts
     elapsed = time.time() - st.session_state.motion_alert_since
