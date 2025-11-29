@@ -1,5 +1,5 @@
 # app_interview.py (updated with webcam/mic check, motion alerts, voice Q&A, resume rating & eligibility)
-from streamlit_webrtc import VideoTransformerBase, webrtc_streamer
+# from streamlit_webrtc import VideoTransformerBase, webrtc_streamer
 import os
 import io
 import time
@@ -7,11 +7,26 @@ from pathlib import Path
 import streamlit as st
 from datetime import datetime
 from typing import List
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
-from streamlit_webrtc import VideoTransformerBase, webrtc_streamer
+# from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+# from streamlit_webrtc import VideoTransformerBase, webrtc_streamer
 import cv2
 import numpy as np
 import pickle
+import streamlit as st
+
+# Try to import streamlit-webrtc but never crash the app if it fails.
+WEBCAM_AVAILABLE = False
+try:
+    from streamlit_webrtc import VideoTransformerBase, webrtc_streamer
+    WEBCAM_AVAILABLE = True
+except Exception as _err:
+    # Import failed (likely missing package or native deps). Provide safe fallbacks.
+    VideoTransformerBase = object
+
+    def webrtc_streamer(*args, **kwargs):
+        # Minimal no-op replacement so the rest of the app can keep running.
+        st.warning("Video features disabled (streamlit-webrtc not available on this host).")
+        return None
 
 # local modules (add to your project)
 from resume_parser import extract_text_from_pdf, extract_skills_and_summary, extract_experience_years
