@@ -1,7 +1,36 @@
-streamlit>=1.18.1
-langchain>=0.0.300
-chromadb>=0.3.23
-pypdf>=3.8.0
-openai>=0.27.0
-tiktoken>=0.4.0
-reportlab>=3.6.12
+# streamlit>=1.18.1
+# langchain>=0.0.300
+# chromadb>=0.3.23
+# pypdf>=3.8.0
+# openai>=0.27.0
+# tiktoken>=0.4.0
+# reportlab>=3.6.12
+# streamlit
+# openai==0.27.8
+# sentence-transformers
+# faiss-cpu
+# pypdf
+# reportlab
+# matplotlib
+# numpy
+# Pillow
+# streamlit-webrtc
+# av
+# opencv-python
+streamlit
+openai
+langchain
+langchain-community
+chromadb
+pytube
+pydub
+assemblyai
+numpy
+googletrans==4.0.0-rc1
+streamlit>=1.18.0
+streamlit-webrtc>=0.47.1
+opencv-python-headless
+numpy
+google-generativeai  # or google-generativeai==<version> if you pin a version
+pydub
+ffmpeg-python
